@@ -15,12 +15,15 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.util.AbstractMap;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -32,7 +35,7 @@ import static org.json.NumberConversionUtil.potentialNumber;
 import static org.json.NumberConversionUtil.stringToNumber;
 
 /**
- * A JSONObject is an unordered collection of name/value pairs. Its external
+ * A JSONObject is (usually) an unordered collection of name/value pairs. Its external
  * form is a string wrapped in curly braces with colons between the names and
  * values, and commas between the values and names. The internal form is an
  * object having <code>get</code> and <code>opt</code> methods for accessing
@@ -80,6 +83,8 @@ import static org.json.NumberConversionUtil.stringToNumber;
  * if they are not the reserved words <code>true</code>, <code>false</code>,
  * or <code>null</code>.</li>
  * </ul>
+ * <p>Note: in case the JSONObject - more clearly it's key/value pairs - should be ordered: 
+ * call JSONObject.setOrdered(true) before using any class of org.json.</p>
  *
  * @author JSON.org
  * @version 2016-08-15
@@ -159,8 +164,15 @@ public class JSONObject {
      * <code>JSONObject.NULL.toString()</code> returns <code>"null"</code>.
      */
     public static final Object NULL = new Null();
+    
+    private static boolean isOrdered;
 
     /**
+     * The list where the JSONObject's ordered keys are kept, or null if the JSONObject was not created ordered.
+     */
+    private final ArrayList<String> keyList;
+
+	/**
      * Construct an empty JSONObject.
      */
     public JSONObject() {
@@ -171,6 +183,7 @@ public class JSONObject {
         // retrieval based on associative access.
         // Therefore, an implementation mustn't rely on the order of the item.
         this.map = new HashMap<String, Object>();
+        this.keyList = isOrdered ? new ArrayList<String>() : null;
     }
 
     /**
@@ -302,8 +315,10 @@ public class JSONObject {
         }
         if (m == null) {
             this.map = new HashMap<String, Object>();
+            this.keyList = isOrdered ? new ArrayList<String>() : null;
         } else {
             this.map = new HashMap<String, Object>(m.size());
+            this.keyList = isOrdered ? new ArrayList<String>(m.size()) : null;
         	for (final Entry<?, ?> e : m.entrySet()) {
         	    if(e.getKey() == null) {
         	        throw new NullPointerException("Null key.");
@@ -311,7 +326,11 @@ public class JSONObject {
                 final Object value = e.getValue();
                 if (value != null) {
                     testValidity(value);
-                    this.map.put(String.valueOf(e.getKey()), wrap(value, recursionDepth + 1, jsonParserConfiguration));
+                    String key = String.valueOf(e.getKey());
+                    this.map.put(key, wrap(value, recursionDepth + 1, jsonParserConfiguration));
+                    if (isOrdered()) {
+                    	this.keyList.add(key);
+                    }
                 }
             }
         }
@@ -369,7 +388,10 @@ public class JSONObject {
      * &#64;JSONPropertyIgnore
      * public String getName() { return this.name; }
      * </pre>
-     * <p>
+     * </p>
+     * <p>Note: in case the JSONObject is ordered (using setOrdered(true) before creating 
+     * the JSONObject) the ordering of this JSONObject is defined by the ordering of 
+     * the reflection access for the bean class.</p>
      *
      * @param bean
      *            An object that has getter methods that should be used to make
@@ -431,6 +453,9 @@ public class JSONObject {
 
     /**
      * Construct a JSONObject from a ResourceBundle.
+     * <p>Note: in case the JSONObject is ordered (using setOrdered(true) before creating 
+     * the JSONObject) the ordering of this JSONObject is defined by the ordering of 
+     * the ResourceBundle.getKeys() enumeration.</p>
      *
      * @param baseName
      *            The ResourceBundle base name.
@@ -481,6 +506,7 @@ public class JSONObject {
      */
     protected JSONObject(int initialCapacity){
         this.map = new HashMap<String, Object>(initialCapacity);
+        this.keyList = isOrdered ? new ArrayList<String>(initialCapacity) : null;
     }
 
     /**
@@ -838,11 +864,15 @@ public class JSONObject {
      *            JSON object
      * @return An array of field names, or null if there are no names.
      */
-    public static String[] getNames(JSONObject jo) {
+    public static String[] getNames(JSONObject jo) { 
         if (jo.isEmpty()) {
             return null;
         }
-        return jo.keySet().toArray(new String[jo.length()]);
+        if (jo.isOrdered()) {
+			return jo.keyList.toArray(new String[jo.keyList.size()]);
+		} else {
+	        return jo.keySet().toArray(new String[jo.length()]);
+		}
     }
 
     /**
@@ -948,6 +978,24 @@ public class JSONObject {
     }
 
     /**
+     * Determine if this JSONObject is ordered.
+     * 
+	 * @return true if this JSONObject is ordered, false otherwise.
+	 */
+	public boolean isOrdered() {
+		return keyList != null;
+	}
+
+    /**
+     * Determine if created JSONObjects will be ordered.
+     * 
+	 * @return true if created JSONObjects are ordered, false otherwise.
+	 */
+	public static boolean isOrderedOnCreation() {
+		return isOrdered;
+	}
+
+    /**
      * Get an enumeration of the keys of the JSONObject. Modifying this key Set will also
      * modify the JSONObject. Use with caution.
      *
@@ -964,11 +1012,16 @@ public class JSONObject {
      * JSONObject. Use with caution.
      *
      * @see Map#keySet()
+     * @see LinkedHashSet if the JSONObject is ordered
      *
      * @return A keySet.
      */
     public Set<String> keySet() {
-        return this.map.keySet();
+    	if (isOrdered()) {
+    		return new LinkedHashSet<String>(keyList);
+		} else {
+	        return this.map.keySet();
+		}
     }
 
     /**
@@ -980,11 +1033,21 @@ public class JSONObject {
      * Use with caution.
      *
      * @see Map#entrySet()
+     * @see LinkedHashSet if the JSONObject is ordered
      *
      * @return An Entry Set
      */
     protected Set<Entry<String, Object>> entrySet() {
-        return this.map.entrySet();
+    	if (isOrdered()) {
+    		LinkedHashSet<Entry<String, Object>> entrySet = new LinkedHashSet<>();
+    		for (String key : keyList) {
+    			AbstractMap.SimpleEntry entry = new AbstractMap.SimpleEntry<>(key, map.get(key));
+    			entrySet.add(entry);
+    		}
+    		return entrySet;
+		} else {
+	        return this.map.entrySet();
+		}
     }
 
     /**
@@ -1002,6 +1065,9 @@ public class JSONObject {
      */
     public void clear() {
         this.map.clear();
+        if (keyList != null) {
+            this.keyList.clear();
+		}
     }
 
     /**
@@ -1024,7 +1090,11 @@ public class JSONObject {
     	if(this.map.isEmpty()) {
     		return null;
     	}
-        return new JSONArray(this.map.keySet());
+    	if (isOrdered()) {
+        	return new JSONArray(keyList);
+		} else {
+	        return new JSONArray(this.map.keySet());
+		}
     }
 
     /**
@@ -1716,6 +1786,9 @@ public class JSONObject {
     /**
      * Populates the internal map of the JSONObject with the bean properties. The
      * bean can not be recursive.
+     * <p>Note: in case the JSONObject is ordered (using setOrdered(true) before creating 
+     * the JSONObject) the ordering of this JSONObject is defined by the ordering of 
+     * the reflection access for the bean class.</p>
      *
      * @see JSONObject#JSONObject(Object)
      *
@@ -1760,6 +1833,10 @@ public class JSONObject {
 
                             testValidity(result);
                             this.map.put(key, wrap(result, objectsRecord));
+                            // even it is a bean: if it is ordered the key has to be stored too
+                        	if (isOrdered()) {
+                        		keyList.add(key);
+                        	}
 
                             objectsRecord.remove(result);
 
@@ -2086,7 +2163,13 @@ public class JSONObject {
         }
         if (value != null) {
             testValidity(value);
-            this.map.put(key, value);
+            Object oldValue = this.map.put(key, value);
+            if (isOrdered()) {
+				if (oldValue == null) {
+					// a key/value pair for this key didn't exist, we have to add the key
+					keyList.add(key);
+				}
+			}
         } else {
             this.remove(key);
         }
@@ -2300,6 +2383,9 @@ public class JSONObject {
      *         no value.
      */
     public Object remove(String key) {
+        if (isOrdered()) {
+			keyList.remove(key);
+		}
         return this.map.remove(key);
     }
 
@@ -2326,7 +2412,7 @@ public class JSONObject {
                 if(valueThis == valueOther) {
                 	continue;
                 }
-                if(valueThis == null) {
+                if (valueThis == null) {
                 	return false;
                 }
                 if (valueThis instanceof JSONObject) {
@@ -2414,6 +2500,20 @@ public class JSONObject {
         return val.indexOf('.') > -1 || val.indexOf('e') > -1
                 || val.indexOf('E') > -1 || "-0".equals(val);
     }
+
+	/**
+	 * Sets or clears a static JSONObject flag for an ordered/unordered afterwards created JSONObject.
+	 * Use this method before creating or using any class of org.json.
+     * <p><b>
+     * Warning: Changing ordering after the creation of the first use of JSONObject may lead - in some 
+     * cases - to unexpected results (e.g. using similar() on an ordered and an unordered JSONObject).
+     * </b></p>
+	 *  
+	 * @param isOrdered the isOrdered flag to set or to be cleared (default: isOrdered is false)
+	 */
+	public static void setOrdered(boolean isOrdered) {
+		JSONObject.isOrdered = isOrdered;
+	}
 
     /**
      * Try to convert a string into a number, boolean, or null. If the string
@@ -2833,6 +2933,8 @@ public class JSONObject {
             if (entry.getValue() == null || NULL.equals(entry.getValue())) {
                 value = null;
             } else if (entry.getValue() instanceof JSONObject) {
+            	// note: this may break ordering (if ordered), but it is used only in
+            	// JSONArray.toList(), which is only used below
                 value = ((JSONObject) entry.getValue()).toMap();
             } else if (entry.getValue() instanceof JSONArray) {
                 value = ((JSONArray) entry.getValue()).toList();
