@@ -15,8 +15,17 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.util.*;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.IdentityHashMap;
+import java.util.Iterator;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Map.Entry;
+import java.util.ResourceBundle;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 import static org.json.NumberConversionUtil.potentialNumber;
@@ -264,6 +273,7 @@ public class JSONObject {
             }
         }
     }
+
     /**
      * Construct a JSONObject from a Map.
      * <p>Note: in case the JSONObject is ordered (using setOrdered(true) before creating the JSONObject) the ordering
@@ -278,6 +288,30 @@ public class JSONObject {
      *            If a key in the map is <code>null</code>
      */
     public JSONObject(Map<?, ?> m) {
+      this(m, 0, new JSONParserConfiguration());
+    }
+
+    /**
+     * Construct a JSONObject from a Map with custom json parse configurations.
+     *
+     * @param m
+     *            A map object that can be used to initialize the contents of
+     *            the JSONObject.
+     * @param jsonParserConfiguration
+     *            Variable to pass parser custom configuration for json parsing.
+     */
+    public JSONObject(Map<?, ?> m, JSONParserConfiguration jsonParserConfiguration) {
+        this(m, 0, jsonParserConfiguration);
+    }
+
+    /**
+     * Construct a JSONObject from a map with recursion depth.
+     *
+     */
+    private JSONObject(Map<?, ?> m, int recursionDepth, JSONParserConfiguration jsonParserConfiguration) {
+        if (recursionDepth > jsonParserConfiguration.getMaxNestingDepth()) {
+          throw new JSONException("JSONObject has reached recursion depth limit of " + jsonParserConfiguration.getMaxNestingDepth());
+        }
         if (m == null) {
             this.map = new HashMap<String, Object>();
             this.keyList = isOrdered ? new ArrayList<String>() : null;
@@ -291,8 +325,7 @@ public class JSONObject {
                 final Object value = e.getValue();
                 if (value != null) {
                     testValidity(value);
-                    String key = String.valueOf(e.getKey());
-                    this.map.put(key, wrap(value));
+                    this.map.put(String.valueOf(e.getKey()), wrap(value, recursionDepth + 1, jsonParserConfiguration));
                     if (isOrdered()) {
                     	this.keyList.add(key);
                     }
@@ -943,24 +976,6 @@ public class JSONObject {
     }
 
     /**
-     * Determine if this JSONObject is ordered.
-     * 
-	 * @return true if this JSONObject is ordered, false otherwise.
-	 */
-	public boolean isOrdered() {
-		return keyList != null;
-	}
-
-    /**
-     * Determine if created JSONObjects will be ordered.
-     * 
-	 * @return true if created JSONObjects are ordered, false otherwise.
-	 */
-	public static boolean isOrderedOnCreation() {
-		return isOrdered;
-	}
-
-    /**
      * Get an enumeration of the keys of the JSONObject. Modifying this key Set will also
      * modify the JSONObject. Use with caution.
      *
@@ -969,7 +984,7 @@ public class JSONObject {
      * @return An iterator of the keys.
      */
     public Iterator<String> keys() {
-	       return this.keySet().iterator();
+        return this.keySet().iterator();
     }
 
     /**
@@ -1747,7 +1762,7 @@ public class JSONObject {
         Object object = this.opt(key);
         return NULL.equals(object) ? defaultValue : object.toString();
     }
-    
+
     /**
      * Populates the internal map of the JSONObject with the bean properties. The
      * bean can not be recursive.
@@ -1907,6 +1922,10 @@ public class JSONObject {
             }
         }
 
+        //If the superclass is Object, no annotations will be found any more
+        if (c.getSuperclass().equals(Object.class))
+            return null;
+
         try {
             return getAnnotation(
                     c.getSuperclass().getMethod(m.getName(), m.getParameterTypes()),
@@ -1960,6 +1979,10 @@ public class JSONObject {
                 continue;
             }
         }
+
+        //If the superclass is Object, no annotations will be found any more
+        if (c.getSuperclass().equals(Object.class))
+            return -1;
 
         try {
             int d = getAnnotationDepth(
@@ -2655,7 +2678,31 @@ public class JSONObject {
         return wrap(object, null);
     }
 
+    /**
+     * Wrap an object, if necessary. If the object is <code>null</code>, return the NULL
+     * object. If it is an array or collection, wrap it in a JSONArray. If it is
+     * a map, wrap it in a JSONObject. If it is a standard property (Double,
+     * String, et al) then it is already wrapped. Otherwise, if it comes from
+     * one of the java packages, turn it into a string. And if it doesn't, try
+     * to wrap it in a JSONObject. If the wrapping fails, then null is returned.
+     *
+     * @param object
+     *            The object to wrap
+     * @param recursionDepth
+     *            Variable for tracking the count of nested object creations.
+     * @param jsonParserConfiguration
+     *            Variable to pass parser custom configuration for json parsing.
+     * @return The wrapped value
+     */
+    static Object wrap(Object object, int recursionDepth, JSONParserConfiguration jsonParserConfiguration) {
+      return wrap(object, null, recursionDepth, jsonParserConfiguration);
+    }
+
     private static Object wrap(Object object, Set<Object> objectsRecord) {
+      return wrap(object, objectsRecord, 0, new JSONParserConfiguration());
+    }
+
+    private static Object wrap(Object object, Set<Object> objectsRecord, int recursionDepth, JSONParserConfiguration jsonParserConfiguration) {
         try {
             if (NULL.equals(object)) {
                 return NULL;
@@ -2673,14 +2720,14 @@ public class JSONObject {
 
             if (object instanceof Collection) {
                 Collection<?> coll = (Collection<?>) object;
-                return new JSONArray(coll);
+                return new JSONArray(coll, recursionDepth, jsonParserConfiguration);
             }
             if (object.getClass().isArray()) {
                 return new JSONArray(object);
             }
             if (object instanceof Map) {
                 Map<?, ?> map = (Map<?, ?>) object;
-                return new JSONObject(map);
+                return new JSONObject(map, recursionDepth, jsonParserConfiguration);
             }
             Package objectPackage = object.getClass().getPackage();
             String objectPackageName = objectPackage != null ? objectPackage
