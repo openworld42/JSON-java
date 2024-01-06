@@ -15,12 +15,15 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.util.AbstractMap;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -276,8 +279,6 @@ public class JSONObject {
 
     /**
      * Construct a JSONObject from a Map.
-     * <p>Note: in case the JSONObject is ordered (using setOrdered(true) before creating the JSONObject) the ordering
-     * of this JSONObject is defined by the ordering of map.entrySet().</p>
      *
      * @param m
      *            A map object that can be used to initialize the contents of
@@ -325,7 +326,8 @@ public class JSONObject {
                 final Object value = e.getValue();
                 if (value != null) {
                     testValidity(value);
-                    this.map.put(String.valueOf(e.getKey()), wrap(value, recursionDepth + 1, jsonParserConfiguration));
+                    String key = String.valueOf(e.getKey());
+                    this.map.put(key, wrap(value, recursionDepth + 1, jsonParserConfiguration));
                     if (isOrdered()) {
                     	this.keyList.add(key);
                     }
@@ -974,6 +976,24 @@ public class JSONObject {
     public boolean isNull(String key) {
         return JSONObject.NULL.equals(this.opt(key));
     }
+
+    /**
+     * Determine if this JSONObject is ordered.
+     * 
+	 * @return true if this JSONObject is ordered, false otherwise.
+	 */
+	public boolean isOrdered() {
+		return keyList != null;
+	}
+
+    /**
+     * Determine if created JSONObjects will be ordered.
+     * 
+	 * @return true if created JSONObjects are ordered, false otherwise.
+	 */
+	public static boolean isOrderedOnCreation() {
+		return isOrdered;
+	}
 
     /**
      * Get an enumeration of the keys of the JSONObject. Modifying this key Set will also
